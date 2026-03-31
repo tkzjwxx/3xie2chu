@@ -1,6 +1,6 @@
 #!/bin/bash
 # ====================================================================
-# 天网系统 V23 双轨解耦版 (全局WARP直通 + 40000端口强引流)
+# 天网系统 V23 双轨解耦版 (面板测网强化 + 批量复制修复版)
 # ====================================================================
 clear
 echo -e "\033[1;36m=================================================================\033[0m"
@@ -42,7 +42,7 @@ mkdir -p /etc/skynet_router
 # 2. 检查 40000 端口状态 (仅提示，不阻断)
 echo -ne "\n\033[1;33m⏳ 检查本地 SOCKS5 代理 (端口 40000)... \033[0m"
 if ! netstat -tlnp 2>/dev/null | grep -q ":40000 "; then
-    echo -e "\033[1;31m[未检测到]\033[0m (请记得稍后手动启动您的代理进程)"
+    echo -e "\033[1;31m[未检测到]\033[0m (请记得手动启动您的代理进程)"
 else
     echo -e "\033[1;32m[就绪]\033[0m"
 fi
@@ -72,12 +72,10 @@ cat << EOF > /etc/skynet_router/config.json
 {
   "log": {"level": "warn"},
   "inbounds": [
-    // === 轨1：全局直通组 ===
     { "type": "hysteria2", "tag": "hy2-global", "listen": "::", "listen_port": 8443, "users": [{"password": "$SYS_PW"}], "tls": {"enabled": true, "server_name": "bing.com", "certificate_path": "/etc/skynet_router/hy2.crt", "key_path": "/etc/skynet_router/hy2.key"} },
     { "type": "vless", "tag": "vless-global", "listen": "127.0.0.1", "listen_port": 10001, "users": [{"uuid": "$SYS_UUID"}], "transport": {"type": "ws", "path": "/vg"} },
     { "type": "vmess", "tag": "vmess-global", "listen": "127.0.0.1", "listen_port": 10002, "users": [{"uuid": "$SYS_UUID", "alterId": 0}], "transport": {"type": "ws", "path": "/mg"} },
     
-    // === 轨2：强制 40000 端口引流组 ===
     { "type": "hysteria2", "tag": "hy2-socks", "listen": "::", "listen_port": 8444, "users": [{"password": "$SYS_PW"}], "tls": {"enabled": true, "server_name": "bing.com", "certificate_path": "/etc/skynet_router/hy2.crt", "key_path": "/etc/skynet_router/hy2.key"} },
     { "type": "vless", "tag": "vless-socks", "listen": "127.0.0.1", "listen_port": 10003, "users": [{"uuid": "$SYS_UUID"}], "transport": {"type": "ws", "path": "/vs"} },
     { "type": "vmess", "tag": "vmess-socks", "listen": "127.0.0.1", "listen_port": 10004, "users": [{"uuid": "$SYS_UUID", "alterId": 0}], "transport": {"type": "ws", "path": "/ms"} }
@@ -110,6 +108,8 @@ systemctl daemon-reload && systemctl enable --now sing-box >/dev/null 2>&1
 echo -e "\n\033[1;35m🌌 构建双轨大一统面板 (st)...\033[0m"
 cat << 'EOF' > /usr/bin/st
 #!/bin/bash
+APIS=("http://api.ipify.org" "http://icanhazip.com" "http://ifconfig.me/ip" "http://ident.me" "http://checkip.amazonaws.com")
+
 while true; do
     source /etc/skynet_router/status.env
     clear
@@ -117,12 +117,29 @@ while true; do
     echo -e "\033[1;37m                 🛡️ V23 双轨解耦大一统总控台 🛡️                  \033[0m"
     echo -e "\033[1;36m==================================================================\033[0m"
     
-    echo -e "\033[1;35m⏳ 正在全景雷达扫描 IP，请稍候...\033[0m"
-    # 并发检测三个出口，大幅提升面板响应速度
-    V4_IP=$(curl -s4 -m 3 api.ipify.org 2>/dev/null || echo "超时或无IPv4") &
-    V6_IP=$(curl -s6 -m 3 api64.ipify.org 2>/dev/null || echo "超时或无IPv6") &
-    SOCKS_IP=$(curl -s4 -m 4 --socks5-hostname 127.0.0.1:40000 api.ipify.org 2>/dev/null || echo "超时或未启动") &
+    echo -e "\033[1;35m⏳ 正在全景雷达扫描 IP，请稍候 (最多等待 8 秒)...\033[0m"
+    
+    (
+        API=${APIS[$RANDOM % ${#APIS[@]}]}
+        TMP_V4=$(curl -s4 -m 8 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
+        [ -z "$TMP_V4" ] && echo "超时或无IPv4" > /tmp/skynet_v4.tmp || echo "$TMP_V4" > /tmp/skynet_v4.tmp
+    ) &
+    
+    (
+        TMP_V6=$(curl -s6 -m 8 api64.ipify.org 2>/dev/null | grep -E -o "([0-9a-fA-F:]+)" | head -n 1)
+        [ -z "$TMP_V6" ] && echo "超时或无IPv6" > /tmp/skynet_v6.tmp || echo "$TMP_V6" > /tmp/skynet_v6.tmp
+    ) &
+    
+    (
+        API=${APIS[$RANDOM % ${#APIS[@]}]}
+        TMP_SOCKS=$(curl -s4 -m 8 --socks5 127.0.0.1:40000 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
+        [ -z "$TMP_SOCKS" ] && echo "超时或未启动" > /tmp/skynet_socks.tmp || echo "$TMP_SOCKS" > /tmp/skynet_socks.tmp
+    ) &
     wait
+
+    V4_IP=$(cat /tmp/skynet_v4.tmp 2>/dev/null)
+    V6_IP=$(cat /tmp/skynet_v6.tmp 2>/dev/null)
+    SOCKS_IP=$(cat /tmp/skynet_socks.tmp 2>/dev/null)
 
     if netstat -tlnp 2>/dev/null | grep -q ":40000 "; then P_ST="\033[1;32m🟢 端口已开\033[0m"
     else P_ST="\033[1;31m🔴 端口关闭\033[0m"; fi
@@ -182,7 +199,10 @@ while true; do
             ;;
         2)
             source /etc/skynet_router/status.env
-            IP=$(curl -s6 -m 3 api64.ipify.org 2>/dev/null || ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1)
+            IP=$(cat /tmp/skynet_v6.tmp 2>/dev/null)
+            if [[ "$IP" == *"超时"* ]] || [[ -z "$IP" ]]; then
+                IP=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1)
+            fi
             [ -z "$IP" ] && IP="获取IPv6失败_请手动替换"
             
             gen_vmess() { echo "vmess://$(echo -n "{\"v\":\"2\",\"ps\":\"$1\",\"add\":\"$2\",\"port\":\"443\",\"id\":\"$SYS_UUID\",\"aid\":\"0\",\"net\":\"ws\",\"type\":\"none\",\"host\":\"$2\",\"path\":\"$3\",\"tls\":\"tls\"}" | base64 -w 0)"; }
@@ -199,6 +219,20 @@ while true; do
             echo -e " 🔵 \033[1;35mVLESS (Argo CDN)\033[0m: \033[40;32m vless://$SYS_UUID@${D_V2}:443?encryption=none&security=tls&sni=${D_V2}&type=ws&host=${D_V2}&path=%2Fvs#Socks-VLESS \033[0m"
             echo -e " 🟡 \033[1;35mVMess (Argo CDN)\033[0m: \033[40;32m $(gen_vmess "Socks-VMess" "${D_M2}" "/ms") \033[0m"
             echo -e "\033[1;36m==================================================================\033[0m"
+            
+            # 👇 新增：完美的批量复制区域，纯净无杂质！ 👇
+            echo -e "\n\033[1;33m👇👇👇 [批量复制区域：请直接全选下方全部代码] 👇👇👇\033[0m"
+            echo -e "\033[0m"
+            echo "hysteria2://$SYS_PW@[$IP]:8443/?sni=bing.com&insecure=1#Global-HY2"
+            echo "vless://$SYS_UUID@${D_V1}:443?encryption=none&security=tls&sni=${D_V1}&type=ws&host=${D_V1}&path=%2Fvg#Global-VLESS"
+            echo "$(gen_vmess "Global-VMess" "${D_M1}" "/mg")"
+            echo "hysteria2://$SYS_PW@[$IP]:8444/?sni=bing.com&insecure=1#Socks-HY2"
+            echo "vless://$SYS_UUID@${D_V2}:443?encryption=none&security=tls&sni=${D_V2}&type=ws&host=${D_V2}&path=%2Fvs#Socks-VLESS"
+            echo "$(gen_vmess "Socks-VMess" "${D_M2}" "/ms")"
+            echo -e "\033[1;33m\n👆👆👆 [批量复制区域：直接全选上方全部代码] 👆👆👆\033[0m"
+            # 👆 新增结束 👆
+            
+            echo ""
             read -n 1 -s -r -p "按任意键返回菜单..."
             ;;
         3) echo -e "\033[1;36m📜 追踪前端分流底层日志 (Ctrl+C 退出)...\033[0m"; journalctl -u sing-box --no-pager --output cat -f -n 50 ;;
@@ -209,5 +243,5 @@ done
 EOF
 chmod +x /usr/bin/st
 
-echo -e "\n\033[1;32m🎉 天网系统 V23 部署完毕！底层网络已彻底解耦！\033[0m"
-echo -e "\033[1;37m👉 请在终端输入 \033[1;33mst\033[1;37m 呼出面板，享受最高自由度的双轨分流！\033[0m"
+echo -e "\n\033[1;32m🎉 天网系统 V23 部署完毕！批量复制功能已完美实装！\033[0m"
+echo -e "\033[1;37m👉 请在终端输入 \033[1;33mst\033[1;37m 呼出面板提取节点吧！\033[0m"
