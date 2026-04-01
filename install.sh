@@ -1,14 +1,14 @@
 #!/bin/bash
 # ====================================================================
-# 天网系统 V23 双轨解耦版 (面板测网强化 + 批量复制修复版)
+# 天网系统 V24 终极解耦版 (纯粹的前端双轨分流路由器)
 # ====================================================================
 clear
 echo -e "\033[1;36m=================================================================\033[0m"
-echo -e "\033[1;37m                 🛡️ 天网系统 V23 (双轨路由解耦版) 🛡️\033[0m"
+echo -e "\033[1;37m                 🛡️ 天网系统 V24 (纯净双轨路由版) 🛡️\033[0m"
 echo -e "\033[1;36m=================================================================\033[0m"
-echo -e "\033[1;33m[架构说明]\033[0m 本脚本仅作为前端流量分发路由器，不触碰您的底层网络。"
+echo -e "\033[1;33m[架构说明]\033[0m 本脚本仅部署 Sing-box 核心作为流量分发路由，绝不碰您的网络底座！"
 echo -e "\033[1;32m[轨 1] 全局直通组:\033[0m HY2(8443) / VLESS(10001) / VMess(10002) -> 走系统全局 WARP"
-echo -e "\033[1;35m[轨 2] 暗网引流组:\033[0m HY2(8444) / VLESS(10003) / VMess(10004) -> 指向本地 40000 端口"
+echo -e "\033[1;35m[轨 2] 赛风引流组:\033[0m HY2(8444) / VLESS(10003) / VMess(10004) -> 走本地 40000 Socks5"
 echo -e "\033[1;36m-----------------------------------------------------------------\033[0m"
 echo -e "  \033[1;32m[1]\033[0m 🚀 部署双轨分流路由器 (Sing-box 核心)"
 echo -e "  \033[1;31m[2]\033[0m 🗑️ 彻底卸载前端路由 (绝不影响底层 WARP 及 SOCKS5)"
@@ -24,6 +24,7 @@ if [ "$menu_choice" == "2" ]; then
     rm -rf /etc/skynet_router /usr/local/bin/cloudflared /usr/bin/st
     rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/cloudflared.service
     systemctl daemon-reload
+    sed -i '/precedence ::ffff:0:0\/96/d' /etc/gai.conf 2>/dev/null
     echo -e "\033[1;32m🎉 卸载完毕！系统已恢复纯净。\033[0m"; exit 0
 elif [ "$menu_choice" == "0" ]; then exit 0
 elif [ "$menu_choice" != "1" ]; then exit 1; fi
@@ -31,7 +32,7 @@ elif [ "$menu_choice" != "1" ]; then exit 1; fi
 clear
 echo -e "\033[1;36m🚀 正在执行【双轨前端路由器】初始化...\033[0m"
 
-# 1. 环境准备
+# 1. 环境准备与 IPv4 优先补丁
 systemctl stop sing-box cloudflared 2>/dev/null
 pkill -9 -f sing-box 2>/dev/null
 rm -rf /etc/skynet_router /usr/bin/st
@@ -39,15 +40,19 @@ apt-get update -y >/dev/null 2>&1
 apt-get install -y curl wget jq openssl net-tools >/dev/null 2>&1
 mkdir -p /etc/skynet_router
 
+sed -i '/precedence ::ffff:0:0\/96/d' /etc/gai.conf 2>/dev/null
+echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
+echo -e "\033[1;32m✅ IPv4 优先补丁已注入，解决纯 IPv6 双栈 DNS 黑洞！\033[0m"
+
 # 2. 检查 40000 端口状态 (仅提示，不阻断)
-echo -ne "\n\033[1;33m⏳ 检查本地 SOCKS5 代理 (端口 40000)... \033[0m"
+echo -ne "\n\033[1;33m⏳ 检查本地 40000 端口... \033[0m"
 if ! netstat -tlnp 2>/dev/null | grep -q ":40000 "; then
-    echo -e "\033[1;31m[未检测到]\033[0m (请记得手动启动您的代理进程)"
+    echo -e "\033[1;31m[未检测到]\033[0m (请确保您用勇哥脚本开启了 40000 的 Socks5 代理)"
 else
     echo -e "\033[1;32m[就绪]\033[0m"
 fi
 
-# 3. 部署 Sing-box 与 密钥
+# 3. 部署 Sing-box 与生成密钥
 echo -e "\n\033[1;33m📦 拉取 Sing-box 核心并生成安全凭证...\033[0m"
 curl -sL -o /tmp/sbox.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz"
 tar -xzf /tmp/sbox.tar.gz -C /tmp/ 2>/dev/null
@@ -67,7 +72,7 @@ D_V2=""
 D_M2=""
 EOF
 
-# 4. 生成双轨 6 节点配置
+# 4. 生成双轨 6 节点配置 (核心路由逻辑)
 cat << EOF > /etc/skynet_router/config.json
 {
   "log": {"level": "warn"},
@@ -114,26 +119,26 @@ while true; do
     source /etc/skynet_router/status.env
     clear
     echo -e "\033[1;36m==================================================================\033[0m"
-    echo -e "\033[1;37m                 🛡️ V23 双轨解耦大一统总控台 🛡️                  \033[0m"
+    echo -e "\033[1;37m                 🛡️ V24 双轨解耦大一统总控台 🛡️                  \033[0m"
     echo -e "\033[1;36m==================================================================\033[0m"
     
-    echo -e "\033[1;35m⏳ 正在全景雷达扫描 IP，请稍候 (最多等待 8 秒)...\033[0m"
+    echo -e "\033[1;35m⏳ 正在扫描双轨 IP，请稍候 (并发测网极速版)...\033[0m"
     
     (
         API=${APIS[$RANDOM % ${#APIS[@]}]}
-        TMP_V4=$(curl -s4 -m 8 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
+        TMP_V4=$(curl -s4 -m 5 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
         [ -z "$TMP_V4" ] && echo "超时或无IPv4" > /tmp/skynet_v4.tmp || echo "$TMP_V4" > /tmp/skynet_v4.tmp
     ) &
     
     (
-        TMP_V6=$(curl -s6 -m 8 api64.ipify.org 2>/dev/null | grep -E -o "([0-9a-fA-F:]+)" | head -n 1)
+        TMP_V6=$(curl -s6 -m 5 api64.ipify.org 2>/dev/null | grep -E -o "([0-9a-fA-F:]+)" | head -n 1)
         [ -z "$TMP_V6" ] && echo "超时或无IPv6" > /tmp/skynet_v6.tmp || echo "$TMP_V6" > /tmp/skynet_v6.tmp
     ) &
     
     (
         API=${APIS[$RANDOM % ${#APIS[@]}]}
-        TMP_SOCKS=$(curl -s4 -m 8 --socks5 127.0.0.1:40000 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
-        [ -z "$TMP_SOCKS" ] && echo "超时或未启动" > /tmp/skynet_socks.tmp || echo "$TMP_SOCKS" > /tmp/skynet_socks.tmp
+        TMP_SOCKS=$(curl -s4 -m 6 --socks5 127.0.0.1:40000 $API 2>/dev/null | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1)
+        [ -z "$TMP_SOCKS" ] && echo "未启动或超时" > /tmp/skynet_socks.tmp || echo "$TMP_SOCKS" > /tmp/skynet_socks.tmp
     ) &
     wait
 
@@ -141,25 +146,27 @@ while true; do
     V6_IP=$(cat /tmp/skynet_v6.tmp 2>/dev/null)
     SOCKS_IP=$(cat /tmp/skynet_socks.tmp 2>/dev/null)
 
-    if netstat -tlnp 2>/dev/null | grep -q ":40000 "; then P_ST="\033[1;32m🟢 端口已开\033[0m"
-    else P_ST="\033[1;31m🔴 端口关闭\033[0m"; fi
+    if netstat -tlnp 2>/dev/null | grep -q ":40000 "; then P_ST="\033[1;32m🟢 40000 端口已连接\033[0m"
+    else P_ST="\033[1;31m🔴 40000 端口离线 (请重启您的赛风脚本)\033[0m"; fi
 
     clear
     echo -e "\033[1;36m==================================================================\033[0m"
-    echo -e "\033[1;37m                 🛡️ V23 双轨解耦大一统总控台 🛡️                  \033[0m"
+    echo -e "\033[1;37m                 🛡️ V24 双轨解耦大一统总控台 🛡️                  \033[0m"
     echo -e "\033[1;36m==================================================================\033[0m"
     echo -e " \033[1;34m>>> 🌐 轨1：系统全局出口 (直连 WARP) <<<\033[0m"
+    echo -e "  * 节点: HY2(8443) / VLESS(10001) / VMess(10002)"
     echo -e "  * 当前全局 IPv4: \033[1;37m$V4_IP\033[0m"
     echo -e "  * 当前全局 IPv6: \033[1;37m$V6_IP\033[0m"
     echo -e "------------------------------------------------------------------"
-    echo -e " \033[1;35m>>> 🏴 轨2：暗网引流出口 (40000 端口) <<<\033[0m"
+    echo -e " \033[1;35m>>> 🏴 轨2：暗网引流出口 (指向 40000 端口) <<<\033[0m"
+    echo -e "  * 节点: HY2(8444) / VLESS(10003) / VMess(10004)"
     echo -e "  * 底座状态侦测 : $P_ST"
-    echo -e "  * 当前穿透 IP  : \033[1;32m$SOCKS_IP\033[0m"
+    echo -e "  * 赛风分流 IP  : \033[1;32m$SOCKS_IP\033[0m"
     echo -e "------------------------------------------------------------------"
     echo -e " \033[1;33m>>> ⚙️ 系统功能库 <<<\033[0m"
     echo -e "  [\033[1;36m1\033[0m] ☁️ 部署 Argo 隧道并录入 4 个专属域名"
-    echo -e "  [\033[1;36m2\033[0m] 🔗 \033[1;32m一键生成并提取双轨 6大节点链接\033[0m"
-    echo -e "  [\033[1;36m3\033[0m] 📜 追踪 Sing-box 流量分发日志"
+    echo -e "  [\033[1;36m2\033[0m] 🔗 \033[1;32m一键生成并提取双轨 6大节点链接 (支持批量纯净复制)\033[0m"
+    echo -e "  [\033[1;36m3\033[0m] 📜 追踪 Sing-box 流量分发路由日志"
     echo -e "  [\033[1;36m0\033[0m] 🚪 退出面板"
     echo -e "\033[1;36m==================================================================\033[0m"
     
@@ -183,15 +190,15 @@ while true; do
                 echo -e "\033[1;32m🎉 Argo 部署完毕！\033[0m\n"
             fi
             
-            echo -e "\033[1;33m【第二步：录入 4 个专属域名】\033[0m"
-            echo -e " \033[1;37m(请在 CF 网页端将这些域名分别映射到 10001~10004 端口)\033[0m"
+            echo -e "\033[1;33m【第二步：录入 4 个专属子域名】\033[0m"
+            echo -e " \033[1;37m(请先去 CF 后台，把四个域名分别映射给 localhost 的 10001~10004 端口)\033[0m"
             read -p "👉 [轨1-全局] 录入 VLESS (10001) 域名: " IN_1
             [ -n "$IN_1" ] && sed -i "s/^D_V1=.*/D_V1=\"$IN_1\"/" /etc/skynet_router/status.env
             read -p "👉 [轨1-全局] 录入 VMess (10002) 域名: " IN_2
             [ -n "$IN_2" ] && sed -i "s/^D_M1=.*/D_M1=\"$IN_2\"/" /etc/skynet_router/status.env
-            read -p "👉 [轨2-暗网] 录入 VLESS (10003) 域名: " IN_3
+            read -p "👉 [轨2-赛风] 录入 VLESS (10003) 域名: " IN_3
             [ -n "$IN_3" ] && sed -i "s/^D_V2=.*/D_V2=\"$IN_3\"/" /etc/skynet_router/status.env
-            read -p "👉 [轨2-暗网] 录入 VMess (10004) 域名: " IN_4
+            read -p "👉 [轨2-赛风] 录入 VMess (10004) 域名: " IN_4
             [ -n "$IN_4" ] && sed -i "s/^D_M2=.*/D_M2=\"$IN_4\"/" /etc/skynet_router/status.env
             
             echo -e "\n\033[1;32m✅ 域名录入完毕！请按 2 提取节点！\033[0m"
@@ -209,28 +216,25 @@ while true; do
             
             clear
             echo -e "\033[1;36m==================================================================\033[0m"
-            echo -e " \033[1;34m>>> 🌐 轨1：系统全局直连组 (使用原生或WARP IP) <<<\033[0m"
+            echo -e " \033[1;34m>>> 🌐 轨1：系统全局直通组 (原生/全局 WARP 出口) <<<\033[0m"
             echo -e " 🟣 \033[1;35mHY2   (端口 8443)\033[0m: \033[40;32m hysteria2://$SYS_PW@[$IP]:8443/?sni=bing.com&insecure=1#Global-HY2 \033[0m"
             echo -e " 🔵 \033[1;35mVLESS (Argo CDN)\033[0m: \033[40;32m vless://$SYS_UUID@${D_V1}:443?encryption=none&security=tls&sni=${D_V1}&type=ws&host=${D_V1}&path=%2Fvg#Global-VLESS \033[0m"
             echo -e " 🟡 \033[1;35mVMess (Argo CDN)\033[0m: \033[40;32m $(gen_vmess "Global-VMess" "${D_M1}" "/mg") \033[0m"
             echo -e "\n------------------------------------------------------------------"
-            echo -e " \033[1;31m>>> 🏴 轨2：暗网引流组 (强制指向 40000 端口极品 IP) <<<\033[0m"
+            echo -e " \033[1;31m>>> 🏴 轨2：赛风暗网引流组 (40000 端口极品 IP 出口) <<<\033[0m"
             echo -e " 🟣 \033[1;35mHY2   (端口 8444)\033[0m: \033[40;32m hysteria2://$SYS_PW@[$IP]:8444/?sni=bing.com&insecure=1#Socks-HY2 \033[0m"
             echo -e " 🔵 \033[1;35mVLESS (Argo CDN)\033[0m: \033[40;32m vless://$SYS_UUID@${D_V2}:443?encryption=none&security=tls&sni=${D_V2}&type=ws&host=${D_V2}&path=%2Fvs#Socks-VLESS \033[0m"
             echo -e " 🟡 \033[1;35mVMess (Argo CDN)\033[0m: \033[40;32m $(gen_vmess "Socks-VMess" "${D_M2}" "/ms") \033[0m"
             echo -e "\033[1;36m==================================================================\033[0m"
             
-            # 👇 新增：完美的批量复制区域，纯净无杂质！ 👇
-            echo -e "\n\033[1;33m👇👇👇 [批量复制区域：请直接全选下方全部代码] 👇👇👇\033[0m"
-            echo -e "\033[0m"
+            echo -e "\n\033[1;33m👇👇👇 [批量复制区域：请直接全选下方全部代码] 👇👇👇\033[0m\033[0m"
             echo "hysteria2://$SYS_PW@[$IP]:8443/?sni=bing.com&insecure=1#Global-HY2"
             echo "vless://$SYS_UUID@${D_V1}:443?encryption=none&security=tls&sni=${D_V1}&type=ws&host=${D_V1}&path=%2Fvg#Global-VLESS"
             echo "$(gen_vmess "Global-VMess" "${D_M1}" "/mg")"
             echo "hysteria2://$SYS_PW@[$IP]:8444/?sni=bing.com&insecure=1#Socks-HY2"
             echo "vless://$SYS_UUID@${D_V2}:443?encryption=none&security=tls&sni=${D_V2}&type=ws&host=${D_V2}&path=%2Fvs#Socks-VLESS"
             echo "$(gen_vmess "Socks-VMess" "${D_M2}" "/ms")"
-            echo -e "\033[1;33m\n👆👆👆 [批量复制区域：直接全选上方全部代码] 👆👆👆\033[0m"
-            # 👆 新增结束 👆
+            echo -e "\033[1;33m👆👆👆 [批量复制区域结束] 👆👆👆\033[0m"
             
             echo ""
             read -n 1 -s -r -p "按任意键返回菜单..."
@@ -243,5 +247,5 @@ done
 EOF
 chmod +x /usr/bin/st
 
-echo -e "\n\033[1;32m🎉 天网系统 V23 部署完毕！批量复制功能已完美实装！\033[0m"
-echo -e "\033[1;37m👉 请在终端输入 \033[1;33mst\033[1;37m 呼出面板提取节点吧！\033[0m"
+echo -e "\n\033[1;32m🎉 天网系统 V24 部署完毕！轻量级双轨分流器已上线！\033[0m"
+echo -e "\033[1;37m👉 请在终端输入 \033[1;33mst\033[1;37m 呼出面板，享受极致稳定的分流体验！\033[0m"
